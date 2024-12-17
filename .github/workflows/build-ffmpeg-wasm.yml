@@ -134,8 +134,9 @@ jobs:
           export AR="emar"
           export LD="emcc"
           export RANLIB="emranlib"
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
 
-          # Configure FFmpeg without pkg-config
+          # Configure FFmpeg
           emconfigure ../configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --target-os=none \
@@ -188,7 +189,6 @@ jobs:
             --ar=emar \
             --ranlib=emranlib \
             --nm=emnm \
-            --x264-params="static=1" \
             --extra-cflags="-I$GITHUB_WORKSPACE/prefix/include" \
             --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib" \
             --extra-libs="-lx264"
