@@ -85,20 +85,49 @@ jobs:
             --disable-ffms \
             --disable-gpac \
             --disable-lsmash \
+            --enable-pic \
             --extra-cflags="-s USE_PTHREADS=0"
 
           # Build and install
-          emmake make -j$(nproc)
+          emmake make V=1 -j$(nproc)
           emmake make install
 
-          # Verify installation
+          # Create pkg-config file manually if it doesn't exist
+          mkdir -p $GITHUB_WORKSPACE/prefix/lib/pkgconfig
+          if [ ! -f "$GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc" ]; then
+            printf "%s\n" \
+              "prefix=$GITHUB_WORKSPACE/prefix" \
+              "exec_prefix=\${prefix}" \
+              "libdir=\${prefix}/lib" \
+              "includedir=\${prefix}/include" \
+              "" \
+              "Name: x264" \
+              "Description: x264 library for Emscripten" \
+              "Version: 0.164.x" \
+              "Libs: -L\${libdir} -lx264" \
+              "Libs.private: " \
+              "Cflags: -I\${includedir}" > "$GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc"
+          fi
+
+          echo "=== Verifying x264 installation ==="
+          echo "Contents of prefix/lib:"
           ls -la $GITHUB_WORKSPACE/prefix/lib/
+          echo "Contents of prefix/lib/pkgconfig:"
           ls -la $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
-          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc || true
+          echo "Contents of x264.pc:"
+          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Testing pkg-config:"
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          pkg-config --libs x264 || true
+          pkg-config --cflags x264 || true
+          echo "=== End verification ==="
 
       - name: Configure FFmpeg
         run: |
           cd build
+
+          # Set environment variables
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           export CFLAGS="-s USE_PTHREADS=0 -${{ matrix.optimization }}"
           export LDFLAGS="-L$GITHUB_WORKSPACE/prefix/lib"
           export CC="emcc"
@@ -106,7 +135,19 @@ jobs:
           export AR="emar"
           export LD="emcc"
           export RANLIB="emranlib"
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export PKG_CONFIG="pkg-config"
+
+          # Debug pkg-config
+          echo "=== Debugging pkg-config ==="
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          pkg-config --list-all
+          pkg-config --libs x264 || true
+          pkg-config --cflags x264 || true
+          ls -l $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
+          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "=== End debugging ==="
+
+          # Configure FFmpeg
           emconfigure ../configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --target-os=none \
@@ -156,7 +197,9 @@ jobs:
             --cxx=em++ \
             --ar=emar \
             --ranlib=emranlib \
-            --nm=emnm
+            --nm=emnm \
+            --extra-cflags="-I$GITHUB_WORKSPACE/prefix/include" \
+            --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib"
 
       - name: Build FFmpeg
         run: |
