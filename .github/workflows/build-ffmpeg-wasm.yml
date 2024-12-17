@@ -68,6 +68,8 @@ jobs:
           wget https://download.videolan.org/pub/videolan/x264/snapshots/x264-snapshot-${X264_VERSION}.tar.bz2
           tar xvfj x264-snapshot-${X264_VERSION}.tar.bz2
           cd x264-snapshot-${X264_VERSION}
+
+          # Configure x264 with emscripten
           emconfigure ./configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --host=i686-gnu \
@@ -75,9 +77,24 @@ jobs:
             --disable-cli \
             --disable-asm \
             --disable-thread \
+            --disable-opencl \
+            --disable-interlaced \
+            --disable-avs \
+            --disable-swscale \
+            --disable-lavf \
+            --disable-ffms \
+            --disable-gpac \
+            --disable-lsmash \
             --extra-cflags="-s USE_PTHREADS=0"
+
+          # Build and install
           emmake make -j$(nproc)
           emmake make install
+
+          # Verify installation
+          ls -la $GITHUB_WORKSPACE/prefix/lib/
+          ls -la $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
+          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc || true
 
       - name: Configure FFmpeg
         run: |
