@@ -1,0 +1,186 @@
+name: Build FFmpeg WebAssembly
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        optimization: ["O2", "O3", "Oz"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Cache Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            emsdk-cache
+            build
+            prefix
+          key: ${{ runner.os }}-emscripten-${{ hashFiles('**/*.c', '**/*.h') }}
+          restore-keys: |
+            ${{ runner.os }}-emscripten-
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v11
+        with:
+          version: "latest"
+          actions-cache-folder: "emsdk-cache"
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            build-essential \
+            cmake \
+            git \
+            libass-dev \
+            libtool \
+            pkg-config \
+            wget \
+            python3 \
+            nasm \
+            brotli \
+            wabt
+
+      - name: Setup Build Environment
+        run: |
+          mkdir -p build
+          mkdir -p prefix
+
+      - name: Build x264
+        run: |
+          cd build
+          X264_VERSION="20170226-2245-stable"
+          wget https://download.videolan.org/pub/videolan/x264/snapshots/x264-snapshot-${X264_VERSION}.tar.bz2
+          tar xvfj x264-snapshot-${X264_VERSION}.tar.bz2
+          cd x264-snapshot-${X264_VERSION}
+          emconfigure ./configure \
+            --prefix=$GITHUB_WORKSPACE/prefix \
+            --host=i686-gnu \
+            --enable-static \
+            --disable-cli \
+            --disable-asm \
+            --disable-thread \
+            --extra-cflags="-s USE_PTHREADS=0"
+          emmake make -j$(nproc)
+          emmake make install
+
+      - name: Configure FFmpeg
+        run: |
+          cd build
+          emconfigure ../configure \
+            --prefix=$GITHUB_WORKSPACE/prefix \
+            --target-os=none \
+            --arch=x86_32 \
+            --enable-cross-compile \
+            --disable-debug \
+            --disable-x86asm \
+            --disable-inline-asm \
+            --disable-stripping \
+            --disable-programs \
+            --disable-doc \
+            --disable-all \
+            --enable-avcodec \
+            --enable-avformat \
+            --enable-swscale \
+            --enable-avfilter \
+            --enable-encoder=libx264,aac \
+            --enable-decoder=h264,aac \
+            --enable-demuxer=mov,matroska \
+            --enable-muxer=mp4,mov \
+            --enable-protocol=file \
+            --enable-filter=scale \
+            --enable-gpl \
+            --enable-libx264 \
+            --disable-runtime-cpudetect \
+            --disable-pthreads \
+            --extra-cflags="-s USE_PTHREADS=0 -${{ matrix.optimization }}" \
+            --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib"
+
+      - name: Build FFmpeg
+        run: |
+          cd build
+          emmake make -j$(nproc)
+        env:
+          CFLAGS: "-${{ matrix.optimization }}"
+
+      - name: Compile to WebAssembly
+        run: |
+          cd build
+          emcc -${{ matrix.optimization }} \
+            -s WASM=1 \
+            -s TOTAL_MEMORY=33554432 \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -s MODULARIZE=1 \
+            -s EXPORT_ES6=1 \
+            -s SINGLE_FILE=1 \
+            -s ENVIRONMENT='web,worker' \
+            --closure 1 \
+            -s NO_FILESYSTEM=1 \
+            -s NO_EXIT_RUNTIME=1 \
+            -s EXPORTED_RUNTIME_METHODS='["cwrap", "setValue", "getValue"]' \
+            -o ffmpeg-${{ matrix.optimization }}.js \
+            ffmpeg.bc
+
+      - name: Optimize WebAssembly
+        run: |
+          cd build
+          # Strip debug symbols
+          wasm-strip ffmpeg-${{ matrix.optimization }}.wasm || true
+          # Optimize using wasm-opt (if available)
+          if command -v wasm-opt &> /dev/null; then
+            wasm-opt -${{ matrix.optimization }} --enable-simd -o ffmpeg-${{ matrix.optimization }}.opt.wasm ffmpeg-${{ matrix.optimization }}.wasm || true
+          else
+            cp ffmpeg-${{ matrix.optimization }}.wasm ffmpeg-${{ matrix.optimization }}.opt.wasm
+          fi
+          # Compress using Brotli
+          brotli -o ffmpeg-${{ matrix.optimization }}.wasm.br ffmpeg-${{ matrix.optimization }}.opt.wasm
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ffmpeg-wasm-${{ matrix.optimization }}
+          path: |
+            build/ffmpeg-${{ matrix.optimization }}.js
+            build/ffmpeg-${{ matrix.optimization }}.opt.wasm
+            build/ffmpeg-${{ matrix.optimization }}.wasm.br
+          retention-days: 7
+
+      - name: Create Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/ffmpeg-${{ matrix.optimization }}.js
+            build/ffmpeg-${{ matrix.optimization }}.opt.wasm
+            build/ffmpeg-${{ matrix.optimization }}.wasm.br
+          tag_name: v${{ github.run_number }}-${{ matrix.optimization }}
+          name: Release ${{ github.run_number }} (${{ matrix.optimization }})
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report Size
+        run: |
+          cd build
+          echo "FFmpeg ${{ matrix.optimization }} build sizes:"
+          echo "Original WASM size:"
+          ls -lh ffmpeg-${{ matrix.optimization }}.wasm || true
+          echo "Optimized WASM size:"
+          ls -lh ffmpeg-${{ matrix.optimization }}.opt.wasm || true
+          echo "Compressed (BR) size:"
+          ls -lh ffmpeg-${{ matrix.optimization }}.wasm.br || true
