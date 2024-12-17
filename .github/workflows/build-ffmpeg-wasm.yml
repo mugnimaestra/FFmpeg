@@ -27,15 +27,16 @@ jobs:
             emsdk-cache
             build
             prefix
-          key: ${{ runner.os }}-emscripten-${{ hashFiles('**/*.c', '**/*.h') }}
+          key: ${{ runner.os }}-emscripten-${{ matrix.optimization }}-${{ hashFiles('**/*.c', '**/*.h') }}
           restore-keys: |
+            ${{ runner.os }}-emscripten-${{ matrix.optimization }}-
             ${{ runner.os }}-emscripten-
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v11
         with:
           version: "latest"
-          actions-cache-folder: "emsdk-cache"
+          actions-cache-folder: "emsdk-cache-${{ matrix.optimization }}"
 
       - name: Install Dependencies
         run: |
@@ -81,6 +82,14 @@ jobs:
       - name: Configure FFmpeg
         run: |
           cd build
+          export CFLAGS="-s USE_PTHREADS=0 -${{ matrix.optimization }}"
+          export LDFLAGS="-L$GITHUB_WORKSPACE/prefix/lib"
+          export CC="emcc"
+          export CXX="em++"
+          export AR="emar"
+          export LD="emcc"
+          export RANLIB="emranlib"
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           emconfigure ../configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --target-os=none \
@@ -107,8 +116,17 @@ jobs:
             --enable-libx264 \
             --disable-runtime-cpudetect \
             --disable-pthreads \
-            --extra-cflags="-s USE_PTHREADS=0 -${{ matrix.optimization }}" \
-            --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib"
+            --disable-assembly \
+            --disable-network \
+            --disable-bzlib \
+            --disable-zlib \
+            --disable-iconv \
+            --yasmexe=false \
+            --cc=emcc \
+            --cxx=em++ \
+            --ar=emar \
+            --ranlib=emranlib \
+            --nm=emnm
 
       - name: Build FFmpeg
         run: |
