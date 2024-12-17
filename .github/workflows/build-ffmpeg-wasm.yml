@@ -117,12 +117,24 @@ jobs:
             --disable-runtime-cpudetect \
             --disable-pthreads \
             --disable-asm \
-            --disable-yasm \
-            --disable-neon \
             --disable-network \
             --disable-bzlib \
             --disable-zlib \
             --disable-iconv \
+            --disable-mmx \
+            --disable-mmxext \
+            --disable-sse \
+            --disable-sse2 \
+            --disable-sse3 \
+            --disable-ssse3 \
+            --disable-sse4 \
+            --disable-sse42 \
+            --disable-avx \
+            --disable-avx2 \
+            --disable-avx512 \
+            --disable-amd3dnow \
+            --disable-amd3dnowext \
+            --disable-simd128 \
             --cc=emcc \
             --cxx=em++ \
             --ar=emar \
