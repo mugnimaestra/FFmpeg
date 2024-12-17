@@ -116,12 +116,13 @@ jobs:
             --enable-libx264 \
             --disable-runtime-cpudetect \
             --disable-pthreads \
-            --disable-assembly \
+            --disable-asm \
+            --disable-yasm \
+            --disable-neon \
             --disable-network \
             --disable-bzlib \
             --disable-zlib \
             --disable-iconv \
-            --yasmexe=false \
             --cc=emcc \
             --cxx=em++ \
             --ar=emar \
