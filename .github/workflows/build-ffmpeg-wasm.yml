@@ -127,8 +127,6 @@ jobs:
           cd build
 
           # Set environment variables
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
-          export PKG_CONFIG_LIBDIR="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           export CFLAGS="-s USE_PTHREADS=0 -${{ matrix.optimization }}"
           export LDFLAGS="-L$GITHUB_WORKSPACE/prefix/lib"
           export CC="emcc"
@@ -136,23 +134,8 @@ jobs:
           export AR="emar"
           export LD="emcc"
           export RANLIB="emranlib"
-          export PKG_CONFIG="pkg-config"
 
-          # Debug pkg-config
-          echo "=== Debugging pkg-config ==="
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-          echo "PKG_CONFIG_LIBDIR=$PKG_CONFIG_LIBDIR"
-          pkg-config --list-all
-          pkg-config --libs x264 || true
-          pkg-config --cflags x264 || true
-          ls -l $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
-          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
-          echo "=== End debugging ==="
-
-          # Configure FFmpeg
-          X264_LIBS="$(pkg-config --libs x264)"
-          X264_CFLAGS="$(pkg-config --cflags x264)"
-
+          # Configure FFmpeg without pkg-config
           emconfigure ../configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --target-os=none \
@@ -198,13 +181,17 @@ jobs:
             --disable-amd3dnow \
             --disable-amd3dnowext \
             --disable-simd128 \
+            --pkg-config=pkg-config \
+            --pkg-config-flags="--static" \
             --cc=emcc \
             --cxx=em++ \
             --ar=emar \
             --ranlib=emranlib \
             --nm=emnm \
-            --extra-cflags="$X264_CFLAGS $CFLAGS" \
-            --extra-ldflags="$X264_LIBS $LDFLAGS"
+            --x264-params="static=1" \
+            --extra-cflags="-I$GITHUB_WORKSPACE/prefix/include" \
+            --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib" \
+            --extra-libs="-lx264"
 
       - name: Build FFmpeg
         run: |
