@@ -140,6 +140,11 @@ jobs:
             --target-os=none \
             --arch=x86_32 \
             --enable-cross-compile \
+            --cc=emcc \
+            --cxx=em++ \
+            --ar=emar \
+            --ranlib=emranlib \
+            --nm=emnm \
             --disable-debug \
             --disable-x86asm \
             --disable-inline-asm \
