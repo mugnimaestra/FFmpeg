@@ -88,45 +88,40 @@ jobs:
             --enable-pic \
             --extra-cflags="-s USE_PTHREADS=0"
 
-          # Build and install
+          # Build and install x264
           emmake make V=1 -j$(nproc)
           emmake make install
 
-          # Create pkg-config file manually if it doesn't exist
+          # Create pkg-config file manually
           mkdir -p $GITHUB_WORKSPACE/prefix/lib/pkgconfig
-          if [ ! -f "$GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc" ]; then
-            printf "%s\n" \
-              "prefix=$GITHUB_WORKSPACE/prefix" \
-              "exec_prefix=\${prefix}" \
-              "libdir=\${prefix}/lib" \
-              "includedir=\${prefix}/include" \
-              "" \
-              "Name: x264" \
-              "Description: x264 library for Emscripten" \
-              "Version: 0.164.x" \
-              "Libs: -L\${libdir} -lx264" \
-              "Libs.private: " \
-              "Cflags: -I\${includedir}" > "$GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc"
-          fi
+          cat > $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc << 'EOL'
+          prefix=$GITHUB_WORKSPACE/prefix
+          exec_prefix=${prefix}
+          libdir=${prefix}/lib
+          includedir=${prefix}/include
+
+          Name: x264
+          Description: x264 library for Emscripten
+          Version: 0.164.x
+          Libs: -L${libdir} -lx264
+          Libs.private: 
+          Cflags: -I${includedir}
+          EOL
 
           echo "=== Verifying x264 installation ==="
-          echo "Contents of prefix/lib:"
           ls -la $GITHUB_WORKSPACE/prefix/lib/
-          echo "Contents of prefix/lib/pkgconfig:"
           ls -la $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
-          echo "Contents of x264.pc:"
           cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
-          echo "Testing pkg-config:"
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
-          pkg-config --libs x264 || true
-          pkg-config --cflags x264 || true
-          echo "=== End verification ==="
 
       - name: Configure FFmpeg
         run: |
           cd build
+          wget https://ffmpeg.org/releases/ffmpeg-6.0.tar.bz2
+          tar xjf ffmpeg-6.0.tar.bz2
+          cd ffmpeg-6.0
 
           # Set environment variables
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
           export CFLAGS="-s USE_PTHREADS=0 -${{ matrix.optimization }}"
           export LDFLAGS="-L$GITHUB_WORKSPACE/prefix/lib"
           export CC="emcc"
@@ -134,10 +129,13 @@ jobs:
           export AR="emar"
           export LD="emcc"
           export RANLIB="emranlib"
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+
+          # Verify pkg-config can find x264
+          pkg-config --libs x264
+          pkg-config --cflags x264
 
           # Configure FFmpeg
-          emconfigure ../configure \
+          emconfigure ./configure \
             --prefix=$GITHUB_WORKSPACE/prefix \
             --target-os=none \
             --arch=x86_32 \
@@ -163,46 +161,27 @@ jobs:
             --enable-libx264 \
             --disable-runtime-cpudetect \
             --disable-pthreads \
-            --disable-asm \
             --disable-network \
             --disable-bzlib \
             --disable-zlib \
             --disable-iconv \
-            --disable-mmx \
-            --disable-mmxext \
-            --disable-sse \
-            --disable-sse2 \
-            --disable-sse3 \
-            --disable-ssse3 \
-            --disable-sse4 \
-            --disable-sse42 \
-            --disable-avx \
-            --disable-avx2 \
-            --disable-avx512 \
-            --disable-amd3dnow \
-            --disable-amd3dnowext \
-            --disable-simd128 \
+            --disable-asm \
             --pkg-config=pkg-config \
             --pkg-config-flags="--static" \
-            --cc=emcc \
-            --cxx=em++ \
-            --ar=emar \
-            --ranlib=emranlib \
-            --nm=emnm \
             --extra-cflags="-I$GITHUB_WORKSPACE/prefix/include" \
             --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib" \
             --extra-libs="-lx264"
 
       - name: Build FFmpeg
-        run: |
-          cd build
-          emmake make -j$(nproc)
         env:
           CFLAGS: "-${{ matrix.optimization }}"
+        run: |
+          cd build/ffmpeg-6.0
+          emmake make -j$(nproc)
 
       - name: Compile to WebAssembly
         run: |
-          cd build
+          cd build/ffmpeg-6.0
           emcc -${{ matrix.optimization }} \
             -s WASM=1 \
             -s TOTAL_MEMORY=33554432 \
@@ -220,16 +199,13 @@ jobs:
 
       - name: Optimize WebAssembly
         run: |
-          cd build
-          # Strip debug symbols
+          cd build/ffmpeg-6.0
           wasm-strip ffmpeg-${{ matrix.optimization }}.wasm || true
-          # Optimize using wasm-opt (if available)
           if command -v wasm-opt &> /dev/null; then
             wasm-opt -${{ matrix.optimization }} --enable-simd -o ffmpeg-${{ matrix.optimization }}.opt.wasm ffmpeg-${{ matrix.optimization }}.wasm || true
           else
             cp ffmpeg-${{ matrix.optimization }}.wasm ffmpeg-${{ matrix.optimization }}.opt.wasm
           fi
-          # Compress using Brotli
           brotli -o ffmpeg-${{ matrix.optimization }}.wasm.br ffmpeg-${{ matrix.optimization }}.opt.wasm
 
       - name: Upload Artifacts
@@ -237,29 +213,14 @@ jobs:
         with:
           name: ffmpeg-wasm-${{ matrix.optimization }}
           path: |
-            build/ffmpeg-${{ matrix.optimization }}.js
-            build/ffmpeg-${{ matrix.optimization }}.opt.wasm
-            build/ffmpeg-${{ matrix.optimization }}.wasm.br
+            build/ffmpeg-6.0/ffmpeg-${{ matrix.optimization }}.js
+            build/ffmpeg-6.0/ffmpeg-${{ matrix.optimization }}.opt.wasm
+            build/ffmpeg-6.0/ffmpeg-${{ matrix.optimization }}.wasm.br
           retention-days: 7
-
-      - name: Create Release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            build/ffmpeg-${{ matrix.optimization }}.js
-            build/ffmpeg-${{ matrix.optimization }}.opt.wasm
-            build/ffmpeg-${{ matrix.optimization }}.wasm.br
-          tag_name: v${{ github.run_number }}-${{ matrix.optimization }}
-          name: Release ${{ github.run_number }} (${{ matrix.optimization }})
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Report Size
         run: |
-          cd build
+          cd build/ffmpeg-6.0
           echo "FFmpeg ${{ matrix.optimization }} build sizes:"
           echo "Original WASM size:"
           ls -lh ffmpeg-${{ matrix.optimization }}.wasm || true
