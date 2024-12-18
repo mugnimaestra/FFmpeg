@@ -92,7 +92,7 @@ jobs:
           emmake make V=1 -j$(nproc)
           emmake make install
 
-          # Create pkg-config file manually
+          # Create proper pkg-config file
           mkdir -p $GITHUB_WORKSPACE/prefix/lib/pkgconfig
           cat > $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc << 'EOL'
           prefix=$GITHUB_WORKSPACE/prefix
@@ -103,15 +103,11 @@ jobs:
           Name: x264
           Description: x264 library for Emscripten
           Version: 0.164.x
+          Requires:
           Libs: -L${libdir} -lx264
           Libs.private: 
           Cflags: -I${includedir}
           EOL
-
-          echo "=== Verifying x264 installation ==="
-          ls -la $GITHUB_WORKSPACE/prefix/lib/
-          ls -la $GITHUB_WORKSPACE/prefix/lib/pkgconfig/
-          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
 
       - name: Configure FFmpeg
         run: |
@@ -122,6 +118,7 @@ jobs:
 
           # Set environment variables
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export PKG_CONFIG_LIBDIR="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           export CFLAGS="-s USE_PTHREADS=0 -${{ matrix.optimization }}"
           export LDFLAGS="-L$GITHUB_WORKSPACE/prefix/lib"
           export CC="emcc"
@@ -130,9 +127,13 @@ jobs:
           export LD="emcc"
           export RANLIB="emranlib"
 
-          # Verify pkg-config can find x264
-          pkg-config --libs x264
-          pkg-config --cflags x264
+          # Debug: Show pkg-config environment
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          echo "Content of x264.pc:"
+          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Testing pkg-config:"
+          pkg-config --libs x264 || true
+          pkg-config --cflags x264 || true
 
           # Configure FFmpeg
           emconfigure ./configure \
@@ -175,7 +176,7 @@ jobs:
             --pkg-config-flags="--static" \
             --extra-cflags="-I$GITHUB_WORKSPACE/prefix/include" \
             --extra-ldflags="-L$GITHUB_WORKSPACE/prefix/lib" \
-            --extra-libs="-lx264"
+            --extra-libs="-lx264" || (cat ffbuild/config.log && false)
 
       - name: Build FFmpeg
         env:
