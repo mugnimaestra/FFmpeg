@@ -92,22 +92,54 @@ jobs:
           emmake make V=1 -j$(nproc)
           emmake make install
 
-          # Create proper pkg-config file
+          # Create proper pkg-config file with absolute paths
           mkdir -p $GITHUB_WORKSPACE/prefix/lib/pkgconfig
-          cat > $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc << 'EOL'
-          prefix=$GITHUB_WORKSPACE/prefix
-          exec_prefix=${prefix}
-          libdir=${prefix}/lib
-          includedir=${prefix}/include
+          echo "prefix=$GITHUB_WORKSPACE/prefix" > $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "exec_prefix=\${prefix}" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "libdir=\${exec_prefix}/lib" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "includedir=\${prefix}/include" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Name: x264" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Description: x264 library for Emscripten" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Version: 0.164.x" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Requires:" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Libs: -L\${libdir} -lx264" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Libs.private: " >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+          echo "Cflags: -I\${includedir}" >> $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
 
-          Name: x264
-          Description: x264 library for Emscripten
-          Version: 0.164.x
-          Requires:
-          Libs: -L${libdir} -lx264
-          Libs.private: 
-          Cflags: -I${includedir}
-          EOL
+          # Verify the content
+          echo "Created x264.pc content:"
+          cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
+
+      - name: Upload x264 Build
+        uses: actions/upload-artifact@v3
+        with:
+          name: x264-build
+          path: ${{ github.workspace }}/prefix/**/*
+          retention-days: 1
+
+      - name: Download x264 Build
+        uses: actions/download-artifact@v3
+        with:
+          name: x264-build
+          path: ${{ github.workspace }}/prefix
+
+      - name: Set x264 Permissions
+        run: |
+          chmod -R 755 ${{ github.workspace }}/prefix/lib
+          chmod -R 755 ${{ github.workspace }}/prefix/include
+          chmod -R 755 ${{ github.workspace }}/prefix/lib/pkgconfig
+          ls -la ${{ github.workspace }}/prefix/lib/pkgconfig
+          echo "PKG_CONFIG_PATH before setting:"
+          echo $PKG_CONFIG_PATH
+          export PKG_CONFIG_PATH="${{ github.workspace }}/prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "PKG_CONFIG_PATH after setting:"
+          echo $PKG_CONFIG_PATH
+          echo "Testing pkg-config with absolute path:"
+          pkg-config --debug --variable pc_path pkg-config
+          pkg-config --debug --exists x264
+          pkg-config --libs --static x264
+          pkg-config --cflags x264
 
       - name: Configure FFmpeg
         run: |
@@ -132,8 +164,9 @@ jobs:
           echo "Content of x264.pc:"
           cat $GITHUB_WORKSPACE/prefix/lib/pkgconfig/x264.pc
           echo "Testing pkg-config:"
-          pkg-config --libs x264 || true
-          pkg-config --cflags x264 || true
+          pkg-config --debug --exists x264
+          pkg-config --libs --static x264
+          pkg-config --cflags x264
 
           # Configure FFmpeg
           emconfigure ./configure \
